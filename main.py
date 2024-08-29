@@ -70,14 +70,41 @@ def create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_
     except Exception as e:
         print("Error creating Aurora Serverless instance:", str(e))
 
-def delete_rds_instance(db_cluster_identifier):
+def delete_rds_instance(db_cluster_identifier, db_instance_identifier):
     rds = boto3.client('rds', region_name='us-east-1')
+    
     try:
-        response = rds.delete_db_cluster(
-            DBClusterIdentifier=db_cluster_identifier,
-            SkipFinalSnapshot=True,  
+        print(f"Deleting DB instance {db_instance_identifier}...")
+        rds.delete_db_instance(
+            DBInstanceIdentifier=db_instance_identifier,
+            SkipFinalSnapshot=True,
         )
+        while True:
+            try:
+                response = rds.describe_db_instances(DBInstanceIdentifier=db_instance_identifier)
+                status = response['DBInstances'][0]['DBInstanceStatus']
+                print(f"DB instance {db_instance_identifier} status: {status}")
+                
+                if status == 'deleting':
+                    print(f"DB instance {db_instance_identifier} is still being deleted. Waiting...")
+                else:
+                    print(f"DB instance {db_instance_identifier} is in unexpected status: {status}")
+                    break
+            except rds.exceptions.DBInstanceNotFoundFault:
+                print(f"DB instance {db_instance_identifier} has been deleted.")
+                break
+            time.sleep(poll_interval)
+    except Exception as e:
+        print(f"Error deleting DB instances in cluster {db_cluster_identifier}: {str(e)}")
+        return
 
+    try:
+        print(f"Deleting DB cluster {db_cluster_identifier}...")
+        rds.delete_db_cluster(
+            DBClusterIdentifier=db_cluster_identifier,
+            SkipFinalSnapshot=True,
+        )
+        
         while True:
             response = rds.describe_db_clusters(DBClusterIdentifier=db_cluster_identifier)
             db_clusters = response['DBClusters']
@@ -94,32 +121,33 @@ def delete_rds_instance(db_cluster_identifier):
             else:
                 print(f"DB cluster {db_cluster_identifier} is in unexpected status: {status}")
                 break
-            print("cluster not deleted yet, waiting...")
+            print("Cluster not deleted yet, waiting...")
             time.sleep(poll_interval)
+
     except rds.exceptions.DBClusterNotFoundFault:
-        print(f'Successfully initiated deletion of RDS cluster: {db_cluster_identifier}')
+        print(f"DB cluster {db_cluster_identifier} has been deleted.")
     except Exception as e:
-        print(f'Error deleting RDS instance: {str(e)}')
+        print(f"Error deleting RDS cluster: {str(e)}")
 
 if __name__ == '__main__':
-    # Create a new RDS instance inside a new RDS cluster
-    db_cluster_name = "kontrol-plane-db-cluster-dev-four"
-    db_instance_name = "instance-four"
-    db_name = "kardinal"
-    endpoint = create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id)
-    print(endpoint)
-    endpoint = "instance-four.cvpzllhpfsxd.us-east-1.rds.amazonaws.com"
+    # # Create a new RDS instance inside a new RDS cluster
+    # db_cluster_name = "kontrol-plane-db-cluster-dev"
+    # db_instance_name = "instance-one"
+    # db_name = "kardinal"
+    # endpoint = create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id)
+    # print(endpoint)
+    # endpoint = "instance-four.cvpzllhpfsxd.us-east-1.rds.amazonaws.com"
 
-    # Make sure we can connect to the target RDS instance via pg client
-    target_conn = psycopg2.connect(
-        host=endpoint,
-        dbname=db_name,
-        user=db_user,
-        password=db_master_password,
-    )
+    # # Make sure we can connect to the target RDS instance via pg client
+    # target_conn = psycopg2.connect(
+    #     host=endpoint,
+    #     dbname=db_name,
+    #     user=db_user,
+    #     password=db_master_password,
+    # )
 
     # Delete the RDS instance 
-    # delete_rds_instance(db_name)
+    # delete_rds_instance(db_cluster_name, db_instance_name)
 
 def create_flow(service_spec, deployment_spec, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
 # def create_flow(service_spec, deployment_spec, flow_uuid):
@@ -160,9 +188,9 @@ def create_flow(service_spec, deployment_spec, flow_uuid, db_user, db_master_pas
         "deployment_spec": modified_deployment_spec,
         "config_map": {
             "DB_CLUSTER_NAME": db_cluster_name,
+            "DB_INSTANCE_NAME": db_cluster_name,
         }
     }
 	
 def delete_flow(config_map, flow_uuid):
-    delete_rds_instance(config_map["DB_CLUSTER_NAME"])
-    return
+    delete_rds_instance(config_map["DB_CLUSTER_NAME"], config_map["DB_INSTANCE_NAME"])
