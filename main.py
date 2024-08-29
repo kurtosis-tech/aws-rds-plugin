@@ -4,20 +4,10 @@ import boto3
 import psycopg2
 from psycopg2 import sql
 
-# https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/rds.html
-
-rds = boto3.client('rds', region_name='us-east-1')
-
-# TODO: figure out if its possible to create these and get rid of these inside the plugin
-# subnet_ids = ['subnet-03bd6e61cef861c5a', 'subnet-0f4a82d2d643763ad']  
-security_group_id = 'sg-0a71103300fdaaca1'
-db_subnet_group_name = 'public-subnets'
-
-# TODO: figure out how to get these inside the plugin
-db_user = "tedi"
-db_master_password= "X7MMcKwVbNMPcGgPfkLn"
+poll_interval = 10
 
 def create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id):
+    rds = boto3.client('rds', region_name='us-east-1')
     try:
         response = rds.create_db_cluster(
             DatabaseName=db_name,
@@ -46,7 +36,7 @@ def create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_
                 print("Error polling cluster status:", str(e))
                 break
             print("cluster not available yet, polling again...")
-            time.sleep(10)
+            time.sleep(poll_interval)
 
         print("Aurora Serverless cluster created:", response)
 
@@ -58,30 +48,30 @@ def create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_
             AvailabilityZone='us-east-1a',  
             PubliclyAccessible=True,  
         )
+        # Poll the instance until it becomes available
         while True:
             response = rds.describe_db_instances(
-                Filters=[
-                    {
-                        'Name': 'db-cluster-id',
-                        'Values': [db_cluster_name]
-                    }
-                ]
+                DBInstanceIdentifier=db_instance_name
             )
 
-            # TODO: Improve availability logic for instances
-            if len(response['DBInstances']) > 0:
-                for db_instance in response['DBInstances']:
-                    if db_instance['PubliclyAccessible']:
-                        endpoint = db_instance['Endpoint']['Address']
-                        port = db_instance['Endpoint']['Port']
-                        return endpoint, port
-            print("no instances in cluster yet, polling again...")
-            time.sleep(10)
+            db_instance = response['DBInstances'][0]
+            status = db_instance['DBInstanceStatus']
+            print(f"Current instance status: {status}")
+
+            if status == 'available':
+                endpoint = db_instance['Endpoint']['Address']
+                port = db_instance['Endpoint']['Port']
+                print(f"DB instance is available. Endpoint: {endpoint}, Port: {port}")
+                return endpoint
+
+            print("DB instance not available yet, polling again...")
+            time.sleep(poll_interval)  
         print("Aurora Serverless db instance created:", response)
     except Exception as e:
-        print("Error creating Aurora Serverless cluster:", str(e))
+        print("Error creating Aurora Serverless instance:", str(e))
 
 def delete_rds_instance(db_cluster_identifier):
+    rds = boto3.client('rds', region_name='us-east-1')
     try:
         response = rds.delete_db_cluster(
             DBClusterIdentifier=db_cluster_identifier,
@@ -105,7 +95,7 @@ def delete_rds_instance(db_cluster_identifier):
                 print(f"DB cluster {db_cluster_identifier} is in unexpected status: {status}")
                 break
             print("cluster not deleted yet, waiting...")
-            time.sleep(10)
+            time.sleep(poll_interval)
     except rds.exceptions.DBClusterNotFoundFault:
         print(f'Successfully initiated deletion of RDS cluster: {db_cluster_identifier}')
     except Exception as e:
@@ -113,9 +103,35 @@ def delete_rds_instance(db_cluster_identifier):
 
 if __name__ == '__main__':
     # Create a new RDS instance inside a new RDS cluster
-    db_cluster_name = "kontrol-plane-db-cluster-dev-three"
-    db_instance_name = "instance-one"
+    db_cluster_name = "kontrol-plane-db-cluster-dev-four"
+    db_instance_name = "instance-four"
     db_name = "kardinal"
+    endpoint = create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id)
+    print(endpoint)
+    endpoint = "instance-four.cvpzllhpfsxd.us-east-1.rds.amazonaws.com"
+
+    # Make sure we can connect to the target RDS instance via pg client
+    target_conn = psycopg2.connect(
+        host=endpoint,
+        dbname=db_name,
+        user=db_user,
+        password=db_master_password,
+    )
+
+    # Delete the RDS instance 
+    # delete_rds_instance(db_name)
+
+def create_flow(service_spec, deployment_spec, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
+# def create_flow(service_spec, deployment_spec, flow_uuid):
+    modified_deployment_spec = copy.deepcopy(deployment_spec)
+
+    container = modified_deployment_spec['template']['spec']['containers'][0]
+    env_vars = container.get('env', [])
+
+    # Create a new RDS instance inside a new RDS cluster
+    db_cluster_name = "kontrol-plane-db-cluster-dev"
+    db_instance_name = "instance-one"
+    db_name = next((env['value'] for env in env_vars if env['name'] == 'DB_NAME'), "postgres")
     endpoint = create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id)
     print(endpoint)
 
@@ -127,35 +143,12 @@ if __name__ == '__main__':
         password=db_master_password,
     )
 
-    # Delete the RDS instance (Uncomment the following line to delete the instance)
-    # delete_rds_instance(db_name)
-
-# def create_flow(service_spec, deployment_spec, flow_uuid, db_cluster_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id):
-def create_flow(service_spec, deployment_spec, flow_uuid):
-    modified_deployment_spec = copy.deepcopy(deployment_spec)
-
-    # Create a new RDS instance inside a new RDS cluster
-    db_cluster_name = "kontrol-plane-db-cluster-dev-four"
-    db_instance_name = "instance-one"
-    db_name = "kardinal"
-    endpoint = create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id)
-    print(endpoint)
-
-    # Make sure we can connect to the target RDS instance via pg client
-    target_conn = psycopg2.connect(
-        host=endpoint,
-        dbname=kardinal,
-        user=db_user,
-        password=db_master_password,
-    )
-
     # update modified deploymend spec with new container pointing to new hostname
-    container = modified_deployment_spec['template']['spec']['containers'][0]
-    existing_env_vars = [
-        env_var for env_var in container.get('env', [])
+    unchanged_env_vars = [
+        env_var for env_var in env_vars
         if env_var['name'] != 'DB_HOSTNAME'  or env_var['name'] != 'DB_USER' or env_var['DB_PASSWORD']
     ]
-    container['env'] = existing_env_vars + [
+    container['env'] = unchanged_env_vars + [
         {'name': 'DB_HOSTNAME', 'value': endpoint},
         {'name': 'DB_USER', 'value': db_user},
         {'name': 'DB_PASSWORD', 'value': db_master_password},
