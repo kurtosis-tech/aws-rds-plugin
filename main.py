@@ -149,11 +149,11 @@ if __name__ == '__main__':
     # Delete the RDS instance 
     # delete_rds_instance(db_cluster_name, db_instance_name)
 
-def create_flow(service_spec, deployment_spec, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
-# def create_flow(service_spec, deployment_spec, flow_uuid):
-    modified_deployment_spec = copy.deepcopy(deployment_spec)
+def create_flow(service_spec, pod_spec, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
+# def create_flow(service_spec, pod_spec, flow_uuid):
+    modified_pod_spec = copy.deepcopy(pod_spec)
 
-    container = modified_deployment_spec['template']['spec']['containers'][0]
+    container = modified_pod_spec['containers'][0]
     env_vars = container.get('env', [])
 
     # Create a new RDS instance inside a new RDS cluster
@@ -182,10 +182,10 @@ def create_flow(service_spec, deployment_spec, flow_uuid, db_user, db_master_pas
         {'name': 'DB_PASSWORD', 'value': db_master_password},
     ]
 
-    modified_deployment_spec['template']['spec']['containers'] = [container]
+    modified_pod_spec['containers'] = [container]
 
     return {
-        "deployment_spec": modified_deployment_spec,
+        "pod_spec": modified_pod_spec,
         "config_map": {
             "DB_CLUSTER_NAME": db_cluster_name,
             "DB_INSTANCE_NAME": db_cluster_name,
