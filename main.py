@@ -150,7 +150,6 @@ if __name__ == '__main__':
     # delete_rds_instance(db_cluster_name, db_instance_name)
 
 def create_flow(service_spec, pod_spec, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
-# def create_flow(service_spec, pod_spec, flow_uuid):
     modified_pod_spec = copy.deepcopy(pod_spec)
 
     container = modified_pod_spec['containers'][0]
