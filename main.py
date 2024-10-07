@@ -6,6 +6,7 @@ from psycopg2 import sql
 
 poll_interval = 10
 
+
 def create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id):
     rds = boto3.client('rds', region_name='us-east-1')
     try:
@@ -70,6 +71,7 @@ def create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_
     except Exception as e:
         print("Error creating Aurora Serverless instance:", str(e))
 
+
 def delete_rds_instance(db_cluster_identifier, db_instance_identifier):
     rds = boto3.client('rds', region_name='us-east-1')
     
@@ -129,6 +131,7 @@ def delete_rds_instance(db_cluster_identifier, db_instance_identifier):
     except Exception as e:
         print(f"Error deleting RDS cluster: {str(e)}")
 
+
 if __name__ == '__main__':
     # # Create a new RDS instance inside a new RDS cluster
     # db_cluster_name = "kontrol-plane-db-cluster-dev"
@@ -149,47 +152,74 @@ if __name__ == '__main__':
     # Delete the RDS instance 
     # delete_rds_instance(db_cluster_name, db_instance_name)
 
-def create_flow(service_spec, pod_spec, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
-    modified_pod_spec = copy.deepcopy(pod_spec)
 
-    container = modified_pod_spec['containers'][0]
-    env_vars = container.get('env', [])
+def create_flow(service_spec, pod_specs, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
+    # main vars
+    modified_pod_specs = []
+    db_name = ""
 
-    # Create a new RDS instance inside a new RDS cluster
-    db_cluster_name = "kontrol-plane-db-cluster-dev"
-    db_instance_name = "instance-one"
-    db_name = next((env['value'] for env in env_vars if env['name'] == 'DB_NAME'), "postgres")
-    endpoint = create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id)
-    print(endpoint)
+    is_there_one_container_at_least: bool = False
+    for pod_spec in pod_specs:
+        modified_pod_spec = copy.deepcopy(pod_spec)
+        containers = modified_pod_spec.get('containers', [])
 
-    # Make sure we can connect to the target RDS instance via pg client
-    target_conn = psycopg2.connect(
-        host=endpoint,
-        dbname=db_name,
-        user=db_user,
-        password=db_master_password,
-    )
+        # Check if at least one container has been received otherwise the resource creation shouldn't be requested
+        if containers:
+            is_there_one_container_at_least = True
 
-    # update modified deploymend spec with new container pointing to new hostname
-    unchanged_env_vars = [
-        env_var for env_var in env_vars
-        if env_var['name'] != 'DB_HOSTNAME'  or env_var['name'] != 'DB_USER' or env_var['DB_PASSWORD']
-    ]
-    container['env'] = unchanged_env_vars + [
-        {'name': 'DB_HOSTNAME', 'value': endpoint},
-        {'name': 'DB_USER', 'value': db_user},
-        {'name': 'DB_PASSWORD', 'value': db_master_password},
-    ]
+            container = modified_pod_spec['containers'][0]
+            env_vars = container.get('env', [])
 
-    modified_pod_spec['containers'] = [container]
+            db_name = next((env['value'] for env in env_vars if env['name'] == 'DB_NAME'), "postgres")
+
+            break
+
+    if is_there_one_container_at_least:
+
+        # Create a new RDS instance inside a new RDS cluster
+        db_cluster_name = "kontrol-plane-db-cluster-dev"
+        db_instance_name = "instance-one"
+        endpoint = create_rds_instance(db_cluster_name, db_instance_name, db_name, db_user, db_master_password, db_subnet_group_name, security_group_id)
+        print(endpoint)
+
+        # Make sure we can connect to the target RDS instance via pg client
+        target_conn = psycopg2.connect(
+            host=endpoint,
+            dbname=db_name,
+            user=db_user,
+            password=db_master_password,
+        )
+
+        # edit all the pod specs to update the environment variables with the new resource address
+        for pod_spec in pod_specs:
+
+            modified_pod_spec = copy.deepcopy(pod_spec)
+
+            container = modified_pod_spec['containers'][0]
+            env_vars = container.get('env', [])
+
+
+            # update modified pod spec with new container pointing to new hostname
+            unchanged_env_vars = [
+                env_var for env_var in env_vars
+                if env_var['name'] != 'DB_HOSTNAME'  or env_var['name'] != 'DB_USER' or env_var['DB_PASSWORD']
+            ]
+            container['env'] = unchanged_env_vars + [
+                {'name': 'DB_HOSTNAME', 'value': endpoint},
+                {'name': 'DB_USER', 'value': db_user},
+                {'name': 'DB_PASSWORD', 'value': db_master_password},
+            ]
+
+            modified_pod_spec['containers'] = [container]
 
     return {
-        "pod_spec": modified_pod_spec,
+        "pod_specs": modified_pod_specs,
         "config_map": {
             "DB_CLUSTER_NAME": db_cluster_name,
-            "DB_INSTANCE_NAME": db_cluster_name,
+            "DB_INSTANCE_NAME": db_instance_name,
         }
     }
-	
+
+
 def delete_flow(config_map, flow_uuid):
     delete_rds_instance(config_map["DB_CLUSTER_NAME"], config_map["DB_INSTANCE_NAME"])
