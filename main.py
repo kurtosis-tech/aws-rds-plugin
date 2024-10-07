@@ -133,7 +133,7 @@ def delete_rds_instance(db_cluster_identifier, db_instance_identifier):
 
 
 if __name__ == '__main__':
-    # # Create a new RDS instance inside a new RDS cluster
+    # Create a new RDS instance inside a new RDS cluster
     # db_cluster_name = "kontrol-plane-db-cluster-dev"
     # db_instance_name = "instance-one"
     # db_name = "kardinal"
@@ -153,7 +153,7 @@ if __name__ == '__main__':
     # delete_rds_instance(db_cluster_name, db_instance_name)
 
 
-def create_flow(service_spec, pod_specs, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
+def create_flow(service_specs: list, pod_specs: list, flow_uuid, db_user, db_master_password, db_subnet_group_name, security_group_id):
     # main vars
     modified_pod_specs = []
     db_name = ""
